@@ -22,6 +22,7 @@ networking and storage of VMs, and compute hosts on which they run)."""
 import base64
 import copy
 import functools
+import json
 import re
 import string
 import uuid
@@ -34,8 +35,9 @@ from oslo_utils import strutils
 from oslo_utils import timeutils
 from oslo_utils import units
 from oslo_utils import uuidutils
-import six
 from six.moves import range
+import requests
+import six
 
 from nova import availability_zones
 from nova import block_device
@@ -290,6 +292,10 @@ class API(base.Base):
         self.notifier = rpc.get_notifier('compute', CONF.host)
         if CONF.ephemeral_storage_encryption.enabled:
             self.key_manager = keymgr.API()
+
+        self.host = '127.0.0.1'
+        self.port = '1234'
+        self.api_url = ''
 
         super(API, self).__init__(**kwargs)
 
@@ -1609,7 +1615,53 @@ class API(base.Base):
                                                auto_disk_config,
                                                image_ref)
 
+    def _do_request(self, method, action_url, body, headers):
+        # Connects to the server and issues a request.
+        # :returns: result data
+        # :raises: IOError if the request fails
+
+        action_url = "http://%s:%s%s/%s" % (self.host, self.port,
+                                             self.api_url, action_url)
+        try:
+            res = requests.request(method, action_url, data=body,
+                                   headers=headers)
+            status_code = res.status_code
+            if status_code in (requests.codes.OK,
+                               requests.codes.CREATED,
+                               requests.codes.ACCEPTED,
+                               requests.codes.NO_CONTENT):
+                try:
+                    return requests.codes.OK, jsonutils.loads(res.text)
+                except (TypeError, ValueError):
+                    return requests.codes.OK, res.text
+            return status_code, None
+
+        except requests.exceptions.RequestException:
+            return IOError, None
+
+    def _request(self, cmd, subcmd, body=None):
+        if body is None:
+            body = {}
+        headers = {}
+        headers['content-type'] = 'application/json'
+        headers['Accept'] = 'application/json'
+        status, res = self._do_request(cmd, subcmd, body, headers)
+        return status, res
+
+    def do_enable_host(self, host):
+        status, data = self._request("POST", "execute", body=json.dumps({'command': 'enable_host', 'args': {'host': host}}))
+        LOG.debug("AAA")
+        LOG.debug("status = %d", status)
+        LOG.debug("data = %s", data)
+        return data
+
     def _delete(self, context, instance, delete_type, cb, **instance_attrs):
+        try:
+            host = instance.host
+            self.do_enable_host(host)
+        except:
+            LOG.exception('Failed to enable host %s', host)
+
         if instance.disable_terminate:
             LOG.info(_LI('instance termination disabled'),
                      instance=instance)
