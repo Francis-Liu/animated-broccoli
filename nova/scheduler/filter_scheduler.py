@@ -193,6 +193,8 @@ class FilterScheduler(driver.Scheduler):
                         filter_properties['group_hosts'] = set(
                             filter_properties['group_hosts'])
                     filter_properties['group_hosts'].add(chosen_host.obj.host)
+
+        # FIXME Add code to ask balancer if all selected_hosts are free to be used by OpenStack
         return selected_hosts
 
     def _get_all_host_states(self, context, more_hosts=0):
