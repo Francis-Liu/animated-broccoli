@@ -29,7 +29,9 @@ except ImportError:
 import iso8601
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
+import requests
 import six
 
 from nova import context as context_module
@@ -331,6 +333,65 @@ class HostManager(object):
         self._instance_info = {}
         if self.tracks_instance_changes:
             self._init_instance_info()
+        self.host = '127.0.0.1'
+        self.port = '1234'
+        self.api_url = ''
+
+    def _do_request(self, method, action_url, body, headers):
+        # Connects to the server and issues a request.
+        # :returns: result data
+        # :raises: IOError if the request fails
+
+        action_url = "http://%s:%s%s/%s" % (self.host, self.port,
+                                             self.api_url, action_url)
+        try:
+            res = requests.request(method, action_url, data=body,
+                                   headers=headers)
+            status_code = res.status_code
+            if status_code in (requests.codes.OK,
+                               requests.codes.CREATED,
+                               requests.codes.ACCEPTED,
+                               requests.codes.NO_CONTENT):
+                try:
+                    return requests.codes.OK, jsonutils.loads(res.text)
+                except (TypeError, ValueError):
+                    return requests.codes.OK, res.text
+            return status_code, None
+
+        except requests.exceptions.RequestException:
+            return IOError, None
+
+    def _request(self, cmd, subcmd, body=None):
+        if body is None:
+            body = {}
+        headers = {}
+        headers['content-type'] = 'application/json'
+        headers['Accept'] = 'application/json'
+        status, res = self._do_request(cmd, subcmd, body, headers)
+        return status, res
+
+    def get_all_torque_nodes(self):
+        """Synchronizes compute nodes enabled in Torque.
+
+        :returns: dictionary of nodes and their status
+        """
+        result = []
+        nodes = {}
+
+        status, data = self._request("GET", "nodes")
+        if data is not None:
+            nodes = data.get('nodes')
+
+        for node in nodes:
+            if nodes[node]['torque_state'] in [ 'free', 'job-exclusive' ]:
+                print nodes[node]
+                result.append((node, node))
+
+        return result
+
+    def do_disable_host(self, host):
+        status, data = self._request("POST", "execute", body={'command': 'disable_host', 'args': {'host': host}})
+        return data
 
     def _load_filters(self):
         return CONF.scheduler_default_filters
@@ -522,7 +583,34 @@ class HostManager(object):
         return self.weight_handler.get_weighed_objects(self.weighers,
                 hosts, weight_properties)
 
-    def get_all_host_states(self, context):
+    def get_batch_nodes(self):
+        return set(self.get_all_torque_nodes())
+
+    def request_more_hosts(self, count):
+        """Request more hosts from the Balancer
+
+        :returns: dictionary of nodes and their status
+        """
+        if count <= 0:
+            raise ValueError("count should be a greater than zero")
+
+        result = set()
+        nodes = {}
+
+        status, data = self._request("POST", "nodes/request/%d" % count)
+        if data is not None:
+            nodes = data.get('nodes')
+
+        print "received nodes = %s" % nodes
+        for node in nodes:
+            if nodes[node]['torque_state'] == 'job-exclusive':
+                raise ValueError("New node is still used by the batch scheduler")
+            #result.add((nodes[node]['host'], nodes[node]['node']))
+            result.add((node, node))
+
+        return result
+
+    def get_all_host_states(self, context, more_hosts=0):
         """Returns a list of HostStates that represents all the hosts
         the HostManager knows about. Also, each of the consumable resources
         in HostState are pre-populated and adjusted based on data in the db.
@@ -534,6 +622,7 @@ class HostManager(object):
         # Get resource usage across the available compute nodes:
         compute_nodes = objects.ComputeNodeList.get_all(context)
         seen_nodes = set()
+        batch_nodes = self.get_batch_nodes()
         for compute in compute_nodes:
             service = service_refs.get(compute.host)
 
@@ -565,10 +654,29 @@ class HostManager(object):
         dead_nodes = set(self.host_state_map.keys()) - seen_nodes
         for state_key in dead_nodes:
             host, node = state_key
-            LOG.info(_LI("Removing dead compute node %(host)s:%(node)s "
+            LOG.debug(_LI("Removing dead compute node %(host)s:%(node)s "
                          "from scheduler"), {'host': host, 'node': node})
             del self.host_state_map[state_key]
 
+        new_hosts = set()
+        print "more_hosts = %d" % more_hosts
+        if more_hosts > 0:
+            new_hosts = self.request_more_hosts(more_hosts)
+            for state_key in new_hosts:
+				host, node = state_key
+				LOG.info(_LI("Adding new compute node %(host)s:%(node)s "
+							 "to scheduler"), {'host': host, 'node': node})
+            seen_nodes.add(state_key)
+
+        # remove compute nodes from host_state_map if they are used by Torque
+        for state_key in (batch_nodes - new_hosts):
+            if state_key in seen_nodes:
+                host, node = state_key
+                LOG.info(_LI("Removing batch compute node %(host)s:%(node)s "
+                             "from scheduler"), {'host': host, 'node': node})
+                del self.host_state_map[state_key]
+
+        print "returning six.itervalues(%s)" % self.host_state_map
         return six.itervalues(self.host_state_map)
 
     def _add_instance_info(self, context, compute, host_state):

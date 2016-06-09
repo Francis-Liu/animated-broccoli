@@ -1038,3 +1038,215 @@ class HostStateTestCase(test.NoDBTestCase):
         self.assertEqual({'0': 10, '1': 43},
                          host.metrics[1].numa_membw_values)
         self.assertIsInstance(host.numa_topology, six.string_types)
+
+
+class HostManagerLCRCTestCase(test.NoDBTestCase):
+    """Test case for HostManager LCRC class."""
+
+    @mock.patch.object(host_manager.HostManager, '_init_instance_info')
+    @mock.patch.object(host_manager.HostManager, '_init_aggregates')
+    def setUp(self, mock_init_agg, mock_init_inst):
+        super(HostManagerLCRCTestCase, self).setUp()
+        self.flags(scheduler_available_filters=['%s.%s' % (__name__, cls) for
+                                                cls in ['FakeFilterClass1',
+                                                        'FakeFilterClass2']])
+        self.flags(scheduler_default_filters=['FakeFilterClass1'])
+        self.host_manager = host_manager.HostManager()
+        self.fake_hosts = [host_manager.HostState('fake_host%s' % x,
+                'fake-node') for x in range(1, 5)]
+        self.fake_hosts += [host_manager.HostState('fake_multihost',
+                'fake-node%s' % x) for x in range(1, 5)]
+
+    @mock.patch.object(host_manager.HostManager, '_request')
+    @mock.patch.object(nova.objects.InstanceList, 'get_by_host')
+    def test_get_all_host_states(self, mock_get_by_host, mock__request):
+        mock_get_by_host.return_value = objects.InstanceList()
+        mock__request.return_value = (True,
+                { "nodes": {
+                    "node3": {
+                        "host": "host3",
+                        "node": "node3",
+                        "openstack_state": "unavailable",
+                        "torque_state": "free"
+                        },
+                    "node4": {
+                        "host": "host4",
+                        "node": "node4",
+                        "openstack_state": "available",
+                        "torque_state": "offline"
+                        }
+                    }})
+        context = 'fake_context'
+        self.mox.StubOutWithMock(objects.ServiceList, 'get_by_binary')
+        self.mox.StubOutWithMock(objects.ComputeNodeList, 'get_all')
+        self.mox.StubOutWithMock(host_manager.LOG, 'warning')
+
+        objects.ServiceList.get_by_binary(
+            context, 'nova-compute').AndReturn(fakes.SERVICES)
+        objects.ComputeNodeList.get_all(context).AndReturn(fakes.COMPUTE_NODES)
+        # node 3 host physical disk space is greater than database
+        host_manager.LOG.warning("Host %(hostname)s has more disk space "
+                                 "than database expected (%(physical)sgb >"
+                                 " %(database)sgb)",
+                                 {'physical': 3333, 'database': 3072,
+                                  'hostname': 'node3'})
+        # Invalid service
+        host_manager.LOG.warning("No compute service record found for "
+                                 "host %(host)s",
+                                 {'host': 'fake'})
+        self.mox.ReplayAll()
+        self.host_manager.get_all_host_states(context)
+        host_states_map = self.host_manager.host_state_map
+
+        self.assertEqual(len(host_states_map), 3)
+        # Check that .service is set properly
+        for i in range(2):
+            compute_node = fakes.COMPUTE_NODES[i]
+            host = compute_node['host']
+            node = compute_node['hypervisor_hostname']
+            state_key = (host, node)
+            self.assertEqual(host_states_map[state_key].service,
+                    obj_base.obj_to_primitive(fakes.get_service_by_host(host)))
+        self.assertEqual(host_states_map[('host1', 'node1')].free_ram_mb,
+                         512)
+        # 511GB
+        self.assertEqual(host_states_map[('host1', 'node1')].free_disk_mb,
+                         524288)
+        self.assertEqual(host_states_map[('host2', 'node2')].free_ram_mb,
+                         1024)
+        # 1023GB
+        self.assertEqual(host_states_map[('host2', 'node2')].free_disk_mb,
+                         1048576)
+        self.assertEqual(host_states_map[('host4', 'node4')].free_ram_mb,
+                         8192)
+        # 8191GB
+        self.assertEqual(host_states_map[('host4', 'node4')].free_disk_mb,
+                         8388608)
+
+    @mock.patch.object(host_manager.HostManager, 'request_more_hosts')
+    @mock.patch.object(host_manager.HostManager, 'get_batch_nodes')
+    @mock.patch.object(nova.objects.InstanceList, 'get_by_host')
+    def test_get_all_host_states_with_request(self, mock_get_by_host,
+                                              mock_get_batch_nodes,
+                                              mock_request_more_hosts):
+        mock_get_by_host.return_value = objects.InstanceList()
+        mock_get_batch_nodes.return_value = set([('host3', 'node3'),
+                                                 ('host4', 'node4')])
+        mock_request_more_hosts.return_value = set([('host3', 'node3')])
+        context = 'fake_context'
+        self.mox.StubOutWithMock(objects.ServiceList, 'get_by_binary')
+        self.mox.StubOutWithMock(objects.ComputeNodeList, 'get_all')
+        self.mox.StubOutWithMock(host_manager.LOG, 'warning')
+
+        objects.ServiceList.get_by_binary(
+            context, 'nova-compute').AndReturn(fakes.SERVICES)
+        objects.ComputeNodeList.get_all(context).AndReturn(fakes.COMPUTE_NODES)
+        # node 3 host physical disk space is greater than database
+        host_manager.LOG.warning("Host %(hostname)s has more disk space "
+                                 "than database expected (%(physical)sgb >"
+                                 " %(database)sgb)",
+                                 {'physical': 3333, 'database': 3072,
+                                  'hostname': 'node3'})
+        # Invalid service
+        host_manager.LOG.warning("No compute service record found for "
+                                 "host %(host)s",
+                                 {'host': 'fake'})
+        self.mox.ReplayAll()
+        self.host_manager.get_all_host_states(context, request_more_hosts=1)
+        host_states_map = self.host_manager.host_state_map
+
+        self.assertEqual(len(host_states_map), 3)
+        # Check that .service is set properly
+        for i in range(3):
+            compute_node = fakes.COMPUTE_NODES[i]
+            host = compute_node['host']
+            node = compute_node['hypervisor_hostname']
+            state_key = (host, node)
+            self.assertEqual(host_states_map[state_key].service,
+                    obj_base.obj_to_primitive(fakes.get_service_by_host(host)))
+        self.assertEqual(host_states_map[('host1', 'node1')].free_ram_mb,
+                         512)
+        # 511GB
+        self.assertEqual(host_states_map[('host1', 'node1')].free_disk_mb,
+                         524288)
+        self.assertEqual(host_states_map[('host2', 'node2')].free_ram_mb,
+                         1024)
+        # 1023GB
+        self.assertEqual(host_states_map[('host2', 'node2')].free_disk_mb,
+                         1048576)
+        # 3071GB
+        self.assertEqual(host_states_map[('host3', 'node3')].free_disk_mb,
+                         3145728)
+        self.assertThat(
+                objects.NUMATopology.obj_from_db_obj(
+                        host_states_map[('host3', 'node3')].numa_topology
+                    )._to_dict(),
+                matchers.DictMatches(fakes.NUMA_TOPOLOGY._to_dict()))
+
+    @mock.patch.object(host_manager.HostManager, '_request')
+    @mock.patch.object(host_manager.HostManager, 'get_batch_nodes')
+    @mock.patch.object(nova.objects.InstanceList, 'get_by_host')
+    def test_get_all_host_states_with_request_mock(self, mock_get_by_host,
+                                              mock_get_batch_nodes,
+                                              mock__request):
+        mock_get_by_host.return_value = objects.InstanceList()
+        mock_get_batch_nodes.return_value = set([('host3', 'node3'),
+                                                 ('host4', 'node4')])
+        mock__request.return_value = (True,
+                { "nodes": {
+                    "node3": {
+                        "host": "host3",
+                        "node": "node3",
+                        "openstack_state": "available",
+                        "torque_state": "offline"
+                        }
+                    }})
+        context = 'fake_context'
+        self.mox.StubOutWithMock(objects.ServiceList, 'get_by_binary')
+        self.mox.StubOutWithMock(objects.ComputeNodeList, 'get_all')
+        self.mox.StubOutWithMock(host_manager.LOG, 'warning')
+
+        objects.ServiceList.get_by_binary(
+            context, 'nova-compute').AndReturn(fakes.SERVICES)
+        objects.ComputeNodeList.get_all(context).AndReturn(fakes.COMPUTE_NODES)
+        # node 3 host physical disk space is greater than database
+        host_manager.LOG.warning("Host %(hostname)s has more disk space "
+                                 "than database expected (%(physical)sgb >"
+                                 " %(database)sgb)",
+                                 {'physical': 3333, 'database': 3072,
+                                  'hostname': 'node3'})
+        # Invalid service
+        host_manager.LOG.warning("No compute service record found for "
+                                 "host %(host)s",
+                                 {'host': 'fake'})
+        self.mox.ReplayAll()
+        self.host_manager.get_all_host_states(context, request_more_hosts=1)
+        host_states_map = self.host_manager.host_state_map
+
+        self.assertEqual(len(host_states_map), 3)
+        # Check that .service is set properly
+        for i in range(3):
+            compute_node = fakes.COMPUTE_NODES[i]
+            host = compute_node['host']
+            node = compute_node['hypervisor_hostname']
+            state_key = (host, node)
+            self.assertEqual(host_states_map[state_key].service,
+                    obj_base.obj_to_primitive(fakes.get_service_by_host(host)))
+        self.assertEqual(host_states_map[('host1', 'node1')].free_ram_mb,
+                         512)
+        # 511GB
+        self.assertEqual(host_states_map[('host1', 'node1')].free_disk_mb,
+                         524288)
+        self.assertEqual(host_states_map[('host2', 'node2')].free_ram_mb,
+                         1024)
+        # 1023GB
+        self.assertEqual(host_states_map[('host2', 'node2')].free_disk_mb,
+                         1048576)
+        # 3071GB
+        self.assertEqual(host_states_map[('host3', 'node3')].free_disk_mb,
+                         3145728)
+        self.assertThat(
+                objects.NUMATopology.obj_from_db_obj(
+                        host_states_map[('host3', 'node3')].numa_topology
+                    )._to_dict(),
+                matchers.DictMatches(fakes.NUMA_TOPOLOGY._to_dict()))

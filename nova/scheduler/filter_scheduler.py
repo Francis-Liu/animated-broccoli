@@ -100,7 +100,7 @@ class FilterScheduler(driver.Scheduler):
         """Fetch options dictionary. Broken out for testing."""
         return self.options.get_configuration()
 
-    def _schedule(self, context, request_spec, filter_properties):
+    def _schedule(self, context, request_spec, filter_properties, more=True):
         """Returns a list of hosts that meet the required specs,
         ordered by their fitness.
         """
@@ -139,47 +139,65 @@ class FilterScheduler(driver.Scheduler):
         # are being scanned in a filter or weighing function.
         hosts = self._get_all_host_states(elevated)
 
+        max_loops = 2
         selected_hosts = []
         num_instances = request_spec.get('num_instances', 1)
-        for num in range(num_instances):
-            # Filter local hosts based on requirements ...
-            hosts = self.host_manager.get_filtered_hosts(hosts,
-                    filter_properties, index=num)
-            if not hosts:
-                # Can't get any more locally.
-                break
+        loop_count = 0
+        if more:
+            max_loops = 2 * num_instances
+        while loop_count < max_loops:
+            loop_count += 1
+            for num in range(num_instances):
+                # Filter local hosts based on requirements ...
+                print "calling get_filtered_hosts with hosts = %s" % hosts
+                filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
+                        filter_properties, index=num)
+                print "filtered_hosts = %s" % filtered_hosts
+                if not filtered_hosts:
+                    if more:
+                        hosts = self._get_all_host_states(elevated, more_hosts=1)
+                        continue
+                    # Can't get any more locally.
+                    break
 
-            LOG.debug("Filtered %(hosts)s", {'hosts': hosts})
+                hosts = filtered_hosts
+                print "filtered_hosts = %s" % filtered_hosts
 
-            weighed_hosts = self.host_manager.get_weighed_hosts(hosts,
-                    filter_properties)
+                LOG.debug("Filtered %(hosts)s", {'hosts': hosts})
 
-            LOG.debug("Weighed %(hosts)s", {'hosts': weighed_hosts})
+                weighed_hosts = self.host_manager.get_weighed_hosts(hosts,
+                        filter_properties)
 
-            scheduler_host_subset_size = CONF.scheduler_host_subset_size
-            if scheduler_host_subset_size > len(weighed_hosts):
-                scheduler_host_subset_size = len(weighed_hosts)
-            if scheduler_host_subset_size < 1:
-                scheduler_host_subset_size = 1
+                LOG.debug("Weighed %(hosts)s", {'hosts': weighed_hosts})
 
-            chosen_host = random.choice(
-                weighed_hosts[0:scheduler_host_subset_size])
-            LOG.debug("Selected host: %(host)s", {'host': chosen_host})
-            selected_hosts.append(chosen_host)
+                scheduler_host_subset_size = CONF.scheduler_host_subset_size
+                if scheduler_host_subset_size > len(weighed_hosts):
+                    scheduler_host_subset_size = len(weighed_hosts)
+                if scheduler_host_subset_size < 1:
+                    scheduler_host_subset_size = 1
 
-            # Now consume the resources so the filter/weights
-            # will change for the next instance.
-            chosen_host.obj.consume_from_instance(instance_properties)
-            if update_group_hosts is True:
-                # NOTE(sbauza): Group details are serialized into a list now
-                # that they are populated by the conductor, we need to
-                # deserialize them
-                if isinstance(filter_properties['group_hosts'], list):
-                    filter_properties['group_hosts'] = set(
-                        filter_properties['group_hosts'])
-                filter_properties['group_hosts'].add(chosen_host.obj.host)
+                chosen_host = random.choice(
+                    weighed_hosts[0:scheduler_host_subset_size])
+                LOG.debug("Selected host: %(host)s", {'host': chosen_host})
+                selected_hosts.append(chosen_host)
+                num_instances -= 1
+
+                # Now consume the resources so the filter/weights
+                # will change for the next instance.
+                chosen_host.obj.consume_from_instance(instance_properties)
+                if update_group_hosts is True:
+                    # NOTE(sbauza): Group details are serialized into a list now
+                    # that they are populated by the conductor, we need to
+                    # deserialize them
+                    if isinstance(filter_properties['group_hosts'], list):
+                        filter_properties['group_hosts'] = set(
+                            filter_properties['group_hosts'])
+                    filter_properties['group_hosts'].add(chosen_host.obj.host)
+
+        # FIXME Add code to ask balancer if all selected_hosts are free to be used by OpenStack
         return selected_hosts
 
-    def _get_all_host_states(self, context):
+    def _get_all_host_states(self, context, more_hosts=0):
         """Template method, so a subclass can implement caching."""
-        return self.host_manager.get_all_host_states(context)
+        return self.host_manager.get_all_host_states(context,
+                                                     more_hosts=more_hosts)
