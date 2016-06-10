@@ -666,7 +666,7 @@ class HostManager(object):
 				host, node = state_key
 				LOG.info(_LI("Adding new compute node %(host)s:%(node)s "
 							 "to scheduler"), {'host': host, 'node': node})
-            seen_nodes.add(state_key)
+                seen_nodes.add(state_key)
 
         # remove compute nodes from host_state_map if they are used by Torque
         for state_key in (batch_nodes - new_hosts):
