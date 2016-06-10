@@ -663,9 +663,9 @@ class HostManager(object):
         if more_hosts > 0:
             new_hosts = self.request_more_hosts(more_hosts)
             for state_key in new_hosts:
-				host, node = state_key
-				LOG.info(_LI("Adding new compute node %(host)s:%(node)s "
-							 "to scheduler"), {'host': host, 'node': node})
+                host, node = state_key
+                LOG.info(_LI("Adding new compute node %(host)s:%(node)s "
+                    "to scheduler"), {'host': host, 'node': node})
                 seen_nodes.add(state_key)
 
         # remove compute nodes from host_state_map if they are used by Torque
