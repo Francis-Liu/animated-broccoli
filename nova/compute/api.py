@@ -1647,7 +1647,7 @@ class API(base.Base):
         headers['Accept'] = 'application/json'
         status, res = self._do_request(cmd, subcmd, body, headers)
         return status, res
-    
+
     def get_node_status(self):
         """Synchronizes compute nodes enabled in Torque.
         :returns: dictionary of nodes and their status
@@ -1657,7 +1657,7 @@ class API(base.Base):
         if data is not None:
             nodes = data.get('nodes')
         return nodes
-    
+
     def do_enable_host(self, host):
         status, data = self._request("POST", "execute", body=json.dumps({'command': 'enable_host', 'args': {'host': host}}))
         LOG.debug("AAA")
