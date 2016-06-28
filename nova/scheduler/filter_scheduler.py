@@ -31,6 +31,8 @@ from nova import objects
 from nova import rpc
 from nova.scheduler import driver
 from nova.scheduler import scheduler_options
+import time
+import datetime
 
 
 CONF = cfg.CONF
@@ -104,6 +106,10 @@ class FilterScheduler(driver.Scheduler):
         """Returns a list of hosts that meet the required specs,
         ordered by their fitness.
         """
+        print "FRANCIS-LIU _scheduler()", datetime.datetime.now(), context, request_spec, filter_properties, more
+        LOG.debug('FRANCIS-LIU _scheduler() SLEEP 30 SEC START')
+        time.sleep(30)
+        LOG.debug('FRANCIS-LIU _scheduler() SLEEP 30 SEC END')
         elevated = context.elevated()
         instance_properties = request_spec['instance_properties']
 
