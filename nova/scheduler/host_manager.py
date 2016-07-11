@@ -375,19 +375,11 @@ class HostManager(object):
 
         :returns: dictionary of nodes and their status
         """
-        result = []
         nodes = {}
-
         status, data = self._request("GET", "nodes")
         if data is not None:
             nodes = data.get('nodes')
-
-        for node in nodes:
-            if nodes[node]['torque_state'] in [ 'free', 'job-exclusive' ]:
-                print nodes[node]
-                result.append((node, node))
-
-        return result
+        return nodes
 
     def do_disable_host(self, host):
         status, data = self._request("POST", "execute", body={'command': 'disable_host', 'args': {'host': host}})
@@ -583,32 +575,29 @@ class HostManager(object):
         return self.weight_handler.get_weighed_objects(self.weighers,
                 hosts, weight_properties)
 
-    def get_batch_nodes(self):
-        return set(self.get_all_torque_nodes())
+    def get_batch_nodes(self, more_mosts):
+        print "more_hosts = %d" % more_hosts
+        if more_hosts > 0:
+            nodes = self.request_more_hosts(more_hosts)
+        else:
+            nodes = self.get_all_torque_nodes()
+        result = set()
+        for node in nodes:
+            if nodes[node]['torque_state'] in [ 'free', 'job-exclusive' ]:
+                print node, nodes[node]
+                result.add((node, node))
+        return result
 
     def request_more_hosts(self, count):
         """Request more hosts from the Balancer
 
         :returns: dictionary of nodes and their status
         """
-        if count <= 0:
-            raise ValueError("count should be a greater than zero")
-
-        result = set()
         nodes = {}
-
         status, data = self._request("POST", "nodes/request/%d" % count)
         if data is not None:
             nodes = data.get('nodes')
-
-        print "received nodes = %s" % nodes
-        for node in nodes:
-            if nodes[node]['torque_state'] == 'job-exclusive':
-                raise ValueError("New node is still used by the batch scheduler")
-            #result.add((nodes[node]['host'], nodes[node]['node']))
-            result.add((node, node))
-
-        return result
+        return nodes
 
     def get_all_host_states(self, context, more_hosts=0):
         """Returns a list of HostStates that represents all the hosts
@@ -616,13 +605,17 @@ class HostManager(object):
         in HostState are pre-populated and adjusted based on data in the db.
         """
 
+        batch_nodes = self.get_batch_nodes(more_hosts)
+        # Make a local copy of self.host_state_map, by doing this
+        # we could avoid conflicts when multiple scheduling threads
+        # update self.host_state_map concurrently.
+        _host_state_copy = {}
         service_refs = {service.host: service
                         for service in objects.ServiceList.get_by_binary(
                             context, 'nova-compute')}
         # Get resource usage across the available compute nodes:
         compute_nodes = objects.ComputeNodeList.get_all(context)
         seen_nodes = set()
-        batch_nodes = self.get_batch_nodes()
         for compute in compute_nodes:
             service = service_refs.get(compute.host)
 
@@ -649,6 +642,7 @@ class HostManager(object):
             host_state.update_service(dict(service))
             self._add_instance_info(context, compute, host_state)
             seen_nodes.add(state_key)
+            _host_state_copy[state_key] = host_state
 
         # remove compute nodes from host_state_map if they are not active
         dead_nodes = set(self.host_state_map.keys()) - seen_nodes
@@ -658,26 +652,16 @@ class HostManager(object):
                          "from scheduler"), {'host': host, 'node': node})
             del self.host_state_map[state_key]
 
-        new_hosts = set()
-        print "more_hosts = %d" % more_hosts
-        if more_hosts > 0:
-            new_hosts = self.request_more_hosts(more_hosts)
-            for state_key in new_hosts:
-                host, node = state_key
-                LOG.info(_LI("Adding new compute node %(host)s:%(node)s "
-                             "to scheduler"), {'host': host, 'node': node})
-                seen_nodes.add(state_key)
-
-        # remove compute nodes from host_state_map if they are used by Torque
-        for state_key in (batch_nodes - new_hosts):
-            if state_key in seen_nodes:
+        # remove compute nodes from _host_state_copy if they are used by Torque
+        for state_key in batch_nodes:
+            if state_key in _host_state_copy:
                 host, node = state_key
                 LOG.info(_LI("Removing batch compute node %(host)s:%(node)s "
                              "from scheduler"), {'host': host, 'node': node})
-                del self.host_state_map[state_key]
+                del _host_state_copy[state_key]
 
-        print "returning six.itervalues(%s)" % self.host_state_map
-        return six.itervalues(self.host_state_map)
+        print "returning six.itervalues(%s)" % _host_state_copy
+        return six.itervalues(_host_state_copy)
 
     def _add_instance_info(self, context, compute, host_state):
         """Adds the host instance info to the host_state object.
