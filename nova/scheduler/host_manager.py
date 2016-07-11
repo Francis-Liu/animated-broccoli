@@ -575,7 +575,7 @@ class HostManager(object):
         return self.weight_handler.get_weighed_objects(self.weighers,
                 hosts, weight_properties)
 
-    def get_batch_nodes(self, more_mosts):
+    def get_batch_nodes(self, more_hosts):
         print "more_hosts = %d" % more_hosts
         if more_hosts > 0:
             nodes = self.request_more_hosts(more_hosts)
