@@ -661,7 +661,10 @@ class HostManager(object):
                 del _host_state_copy[state_key]
 
         print "returning six.itervalues(%s)" % _host_state_copy
-        return six.itervalues(_host_state_copy)
+        if more_hosts:
+            return six.itervalues(_host_state_copy), len(_host_state_copy)
+        else:
+            return six.itervalues(_host_state_copy)
 
     def _add_instance_info(self, context, compute, host_state):
         """Adds the host instance info to the host_state object.

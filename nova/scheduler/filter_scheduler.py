@@ -147,6 +147,7 @@ class FilterScheduler(driver.Scheduler):
         loop_count = 0
         if more:
             max_loops = 2 * num_instances
+            last_num_hosts = 0
         while loop_count < max_loops:
             loop_count += 1
             for num in range(num_instances):
@@ -157,7 +158,10 @@ class FilterScheduler(driver.Scheduler):
                 print "filtered_hosts = %s" % filtered_hosts
                 if not filtered_hosts:
                     if more:
-                        hosts = self._get_all_host_states(elevated, more_hosts=1)
+                        hosts, num_hosts = self._get_all_host_states(elevated, more_hosts=1)
+                        if num_hosts > last_num_hosts:
+                            max_loops += 1
+                        last_num_hosts = num_hosts
                         continue
                     # Can't get any more locally.
                     break
