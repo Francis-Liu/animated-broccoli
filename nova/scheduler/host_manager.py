@@ -379,7 +379,12 @@ class HostManager(object):
         status, data = self._request("GET", "nodes")
         if data is not None:
             nodes = data.get('nodes')
-        return nodes
+        result = set()
+        for node in nodes:
+            if nodes[node]['torque_state'] in [ 'free', 'job-exclusive' ]:
+                print node, nodes[node]
+                result.add((node, node))
+        return result
 
     def do_disable_host(self, host):
         status, data = self._request("POST", "execute", body={'command': 'disable_host', 'args': {'host': host}})
@@ -575,19 +580,6 @@ class HostManager(object):
         return self.weight_handler.get_weighed_objects(self.weighers,
                 hosts, weight_properties)
 
-    def get_batch_nodes(self, more_hosts):
-        print "more_hosts = %d" % more_hosts
-        if more_hosts > 0:
-            nodes = self.request_more_hosts(more_hosts)
-        else:
-            nodes = self.get_all_torque_nodes()
-        result = set()
-        for node in nodes:
-            if nodes[node]['torque_state'] in [ 'free', 'job-exclusive' ]:
-                print node, nodes[node]
-                result.add((node, node))
-        return result
-
     def request_more_hosts(self, count):
         """Request more hosts from the Balancer
 
@@ -597,15 +589,22 @@ class HostManager(object):
         status, data = self._request("POST", "nodes/request/%d" % count)
         if data is not None:
             nodes = data.get('nodes')
-        return nodes
+        result = set()
+        for node in nodes:
+            print node, nodes[node]
+            result.add((node, node))
+        return result
 
     def get_all_host_states(self, context, more_hosts=0):
         """Returns a list of HostStates that represents all the hosts
         the HostManager knows about. Also, each of the consumable resources
         in HostState are pre-populated and adjusted based on data in the db.
         """
-
-        batch_nodes = self.get_batch_nodes(more_hosts)
+        print "more_hosts = %d" % more_hosts
+        if more_hosts > 0:
+            new_nodes = self.request_more_hosts(more_hosts)
+        else:
+            batch_nodes = self.get_all_torque_nodes()
         # Make a local copy of self.host_state_map, by doing this
         # we could avoid conflicts when multiple scheduling threads
         # update self.host_state_map concurrently.
@@ -642,7 +641,9 @@ class HostManager(object):
             host_state.update_service(dict(service))
             self._add_instance_info(context, compute, host_state)
             seen_nodes.add(state_key)
-            _host_state_copy[state_key] = host_state
+            if  (more_hosts > 0 and state_key in new_nodes) or \
+                (more_hosts == 0 and state_key not in batch_nodes):
+                _host_state_copy[state_key] = host_state
 
         # remove compute nodes from host_state_map if they are not active
         dead_nodes = set(self.host_state_map.keys()) - seen_nodes
@@ -651,14 +652,6 @@ class HostManager(object):
             LOG.debug(_LI("Removing dead compute node %(host)s:%(node)s "
                          "from scheduler"), {'host': host, 'node': node})
             del self.host_state_map[state_key]
-
-        # remove compute nodes from _host_state_copy if they are used by Torque
-        for state_key in batch_nodes:
-            if state_key in _host_state_copy:
-                host, node = state_key
-                LOG.info(_LI("Removing batch compute node %(host)s:%(node)s "
-                             "from scheduler"), {'host': host, 'node': node})
-                del _host_state_copy[state_key]
 
         print "returning six.itervalues(%s)" % _host_state_copy
         if more_hosts:

@@ -145,9 +145,6 @@ class FilterScheduler(driver.Scheduler):
         selected_hosts = []
         num_instances = request_spec.get('num_instances', 1)
         loop_count = 0
-        if more:
-            max_loops = 2 * num_instances
-            last_num_hosts = 0
         while loop_count < max_loops:
             loop_count += 1
             for num in range(num_instances):
@@ -157,14 +154,23 @@ class FilterScheduler(driver.Scheduler):
                         filter_properties, index=num)
                 print "filtered_hosts = %s" % filtered_hosts
                 if not filtered_hosts:
-                    if more:
-                        hosts, num_hosts = self._get_all_host_states(elevated, more_hosts=1)
-                        if num_hosts > last_num_hosts:
-                            max_loops += 1
-                        last_num_hosts = num_hosts
-                        continue
                     # Can't get any more locally.
-                    break
+                    if more:
+                        more = False # one request does not wait twice
+                        hosts, num_hosts = self._get_all_host_states(elevated, more_hosts=1) # TODO multiple instances might request more_hosts>1, and wait W per instance
+                        if num_hosts > 0:
+                            print "calling get_filtered_hosts with newly acquired hosts"
+                            filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
+                                    filter_properties, index=num)
+                            print "new filtered_hosts = %s" % filtered_hosts
+                            if not filtered_hosts:
+                                print "Race condition: another scheduler thread moved my cheese"
+                                break
+                        else:
+                            print "Cannot receive extra nodes"
+                            break
+                    else:
+                        break
 
                 hosts = filtered_hosts
                 print "filtered_hosts = %s" % filtered_hosts
