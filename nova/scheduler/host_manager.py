@@ -645,7 +645,7 @@ class HostManager(object):
             host_state.update_service(dict(service))
             self._add_instance_info(context, compute, host_state)
             seen_nodes.add(state_key)
-            if state_key in _avail_hosts):
+            if state_key in _avail_hosts:
                 _host_state_copy[state_key] = host_state
 
         # remove compute nodes from host_state_map if they are not active
