@@ -166,7 +166,7 @@ class FilterScheduler(driver.Scheduler):
                             print "new filtered_hosts = %s" % filtered_hosts
                             if not filtered_hosts:
                                 print "ERROR - host lock doesn't work!"
-                                self.host_manager.unlock_hosts(more_host_names)
+                                self.host_manager.do_unlock_hosts(more_host_names)
                                 more_host_names = []
                                 break
                         else:
