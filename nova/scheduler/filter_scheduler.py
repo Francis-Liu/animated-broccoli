@@ -143,6 +143,7 @@ class FilterScheduler(driver.Scheduler):
 
         max_loops = 2
         selected_hosts = []
+        more_host_names = []
         num_instances = request_spec.get('num_instances', 1)
         loop_count = 0
         while loop_count < max_loops:
@@ -157,14 +158,16 @@ class FilterScheduler(driver.Scheduler):
                     # Can't get any more locally.
                     if more:
                         more = False # one request does not wait twice
-                        hosts, num_hosts = self._get_all_host_states(elevated, more_hosts=1) # TODO multiple instances might request more_hosts>1, and wait W per instance
-                        if num_hosts > 0:
+                        hosts, more_host_names = self._get_all_host_states(elevated, more_hosts=1) # TODO multiple instances might request more_hosts>1, and wait W per instance
+                        if len(more_host_names) > 0:
                             print "calling get_filtered_hosts with newly acquired hosts"
                             filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
                                     filter_properties, index=num)
                             print "new filtered_hosts = %s" % filtered_hosts
                             if not filtered_hosts:
-                                print "Race condition: another scheduler thread moved my cheese"
+                                print "ERROR - host lock doesn't work!"
+                                self.host_manager.unlock_hosts(more_host_names)
+                                more_host_names = []
                                 break
                         else:
                             print "Cannot receive extra nodes"
@@ -197,6 +200,9 @@ class FilterScheduler(driver.Scheduler):
                 # Now consume the resources so the filter/weights
                 # will change for the next instance.
                 chosen_host.obj.consume_from_instance(instance_properties)
+                if len(more_host_names):
+                    self.host_manager.unlock_hosts(more_host_names)
+                    more_host_names = []
                 if update_group_hosts is True:
                     # NOTE(sbauza): Group details are serialized into a list now
                     # that they are populated by the conductor, we need to

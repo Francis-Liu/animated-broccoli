@@ -370,7 +370,7 @@ class HostManager(object):
         status, res = self._do_request(cmd, subcmd, body, headers)
         return status, res
 
-    def get_all_torque_nodes(self):
+    def get_available_hosts(self):
         """Synchronizes compute nodes enabled in Torque.
 
         :returns: dictionary of nodes and their status
@@ -381,10 +381,14 @@ class HostManager(object):
             nodes = data.get('nodes')
         result = set()
         for node in nodes:
-            if nodes[node]['torque_state'] in [ 'free', 'job-exclusive' ]:
-                print node, nodes[node]
+            print node, nodes[node]
+            if nodes[node]['openstack_state'] == 'available':
                 result.add((node, node))
         return result
+
+    def do_unlock_hosts(self, hosts):
+        status, data = self._request("POST", "execute", body={'command': 'unlock_hosts', 'args': {'hosts': hosts}})
+        return data
 
     def do_disable_host(self, host):
         status, data = self._request("POST", "execute", body={'command': 'disable_host', 'args': {'host': host}})
@@ -602,9 +606,9 @@ class HostManager(object):
         """
         print "more_hosts = %d" % more_hosts
         if more_hosts > 0:
-            new_nodes = self.request_more_hosts(more_hosts)
+            _avail_hosts = self.request_more_hosts(more_hosts)
         else:
-            batch_nodes = self.get_all_torque_nodes()
+            _avail_hosts = self.get_available_hosts()
         # Make a local copy of self.host_state_map, by doing this
         # we could avoid conflicts when multiple scheduling threads
         # update self.host_state_map concurrently.
@@ -641,8 +645,7 @@ class HostManager(object):
             host_state.update_service(dict(service))
             self._add_instance_info(context, compute, host_state)
             seen_nodes.add(state_key)
-            if  (more_hosts > 0 and state_key in new_nodes) or \
-                (more_hosts == 0 and state_key not in batch_nodes):
+            if state_key in _avail_hosts):
                 _host_state_copy[state_key] = host_state
 
         # remove compute nodes from host_state_map if they are not active
@@ -655,7 +658,7 @@ class HostManager(object):
 
         print "returning six.itervalues(%s)" % _host_state_copy
         if more_hosts:
-            return six.itervalues(_host_state_copy), len(_host_state_copy)
+            return six.itervalues(_host_state_copy), [h[0] for h in _avail_hosts]
         else:
             return six.itervalues(_host_state_copy)
 
