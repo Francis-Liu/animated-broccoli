@@ -390,10 +390,6 @@ class HostManager(object):
         status, data = self._request("POST", "execute", body={'command': 'unlock_hosts', 'args': {'hosts': hosts}})
         return data
 
-    def do_disable_host(self, host):
-        status, data = self._request("POST", "execute", body={'command': 'disable_host', 'args': {'host': host}})
-        return data
-
     def _load_filters(self):
         return CONF.scheduler_default_filters
 
