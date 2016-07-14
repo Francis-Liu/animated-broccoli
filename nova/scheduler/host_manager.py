@@ -387,7 +387,7 @@ class HostManager(object):
         return result
 
     def do_unlock_hosts(self, hosts):
-        status, data = self._request("POST", "execute", body={'command': 'unlock_hosts', 'args': {'hosts': hosts}})
+        status, data = self._request("POST", "execute", body=json.dumps({'command': 'unlock_hosts', 'args': {'hosts': hosts}}))
         return data
 
     def _load_filters(self):
