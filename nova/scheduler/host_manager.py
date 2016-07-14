@@ -33,6 +33,7 @@ from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 import requests
 import six
+import json
 
 from nova import context as context_module
 from nova import exception
