@@ -30,6 +30,8 @@ from nova.i18n import _
 from nova import rpc
 from nova.scheduler import driver
 from nova.scheduler import scheduler_options
+import time
+import datetime
 
 
 CONF = nova.conf.CONF
@@ -85,7 +87,7 @@ class FilterScheduler(driver.Scheduler):
         """Fetch options dictionary. Broken out for testing."""
         return self.options.get_configuration()
 
-    def _schedule(self, context, spec_obj):
+    def _schedule(self, context, spec_obj, more=True):
         """Returns a list of hosts that meet the required specs,
         ordered by their fitness.
         """
@@ -103,43 +105,106 @@ class FilterScheduler(driver.Scheduler):
         # are being scanned in a filter or weighing function.
         hosts = self._get_all_host_states(elevated)
 
+        max_loops = 2
         selected_hosts = []
+        more_host_names = []
         num_instances = spec_obj.num_instances
         # NOTE(sbauza): Adding one field for any out-of-tree need
         spec_obj.config_options = config_options
-        for num in range(num_instances):
-            # Filter local hosts based on requirements ...
-            hosts = self.host_manager.get_filtered_hosts(hosts,
-                    spec_obj, index=num)
-            if not hosts:
-                # Can't get any more locally.
-                break
 
-            LOG.debug("Filtered %(hosts)s", {'hosts': hosts})
+        loop_count = 0
+        while loop_count < max_loops:
+            loop_count += 1
+            for num in range(num_instances):
+                # Filter local hosts based on requirements ...
+                print "calling get_filtered_hosts with hosts = %s" % hosts
+                filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
+                        spec_obj, index=num)
+                print "filtered_hosts = %s" % filtered_hosts
+                if not filtered_hosts:
+                    # Can't get any more locally.
+                    if more:
+                        more = False # one request does not wait twice
+                        hosts, more_host_names = self._get_all_host_states(elevated, more_hosts=1) # TODO multiple instances might request more_hosts>1, and wait W per instance
+                        if len(more_host_names) > 0:
+                            print "calling get_filtered_hosts with newly acquired hosts"
+                            filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
+                                    filter_properties, index=num)
+                            print "new filtered_hosts = %s" % filtered_hosts
+                            if not filtered_hosts:
+                                print "ERROR - host lock doesn't work!"
+                                self.host_manager.do_unlock_hosts(more_host_names)
+                                more_host_names = []
+                                break
+                        else:
+                            print "Cannot receive extra nodes"
+                            break
+                    else:
+                        break
 
-            weighed_hosts = self.host_manager.get_weighed_hosts(hosts,
-                    spec_obj)
+                hosts = filtered_hosts
+                print "filtered_hosts = %s" % filtered_hosts
 
-            LOG.debug("Weighed %(hosts)s", {'hosts': weighed_hosts})
+                LOG.debug("Filtered %(hosts)s", {'hosts': hosts})
 
-            scheduler_host_subset_size = max(1,
-                                             CONF.scheduler_host_subset_size)
-            if scheduler_host_subset_size < len(weighed_hosts):
-                weighed_hosts = weighed_hosts[0:scheduler_host_subset_size]
-            chosen_host = random.choice(weighed_hosts)
+                weighed_hosts = self.host_manager.get_weighed_hosts(hosts,
+                        spec_obj)
 
-            LOG.debug("Selected host: %(host)s", {'host': chosen_host})
-            selected_hosts.append(chosen_host)
+                LOG.debug("Weighed %(hosts)s", {'hosts': weighed_hosts})
 
-            # Now consume the resources so the filter/weights
-            # will change for the next instance.
-            chosen_host.obj.consume_from_request(spec_obj)
-            if spec_obj.instance_group is not None:
-                spec_obj.instance_group.hosts.append(chosen_host.obj.host)
-                # hosts has to be not part of the updates when saving
-                spec_obj.instance_group.obj_reset_changes(['hosts'])
+                scheduler_host_subset_size = max(1,
+                                                 CONF.scheduler_host_subset_size)
+                if scheduler_host_subset_size < len(weighed_hosts):
+                    weighed_hosts = weighed_hosts[0:scheduler_host_subset_size]
+                chosen_host = random.choice(weighed_hosts)
+
+                LOG.debug("Selected host: %(host)s", {'host': chosen_host})
+                selected_hosts.append(chosen_host)
+
+                # Now consume the resources so the filter/weights
+                # will change for the next instance.
+                chosen_host.obj.consume_from_request(spec_obj)
+                if spec_obj.instance_group is not None:
+                    spec_obj.instance_group.hosts.append(chosen_host.obj.host)
+                    # hosts has to be not part of the updates when saving
+                    spec_obj.instance_group.obj_reset_changes(['hosts'])
+
+                # FIXME For reference, this is the Liberty LCRC code
+                # scheduler_host_subset_size = CONF.scheduler_host_subset_size
+                # if scheduler_host_subset_size > len(weighed_hosts):
+                    # scheduler_host_subset_size = len(weighed_hosts)
+                # if scheduler_host_subset_size < 1:
+                    # scheduler_host_subset_size = 1
+
+                # chosen_host = random.choice(
+                    # weighed_hosts[0:scheduler_host_subset_size])
+                # LOG.debug("Selected host: %(host)s", {'host': chosen_host})
+                # selected_hosts.append(chosen_host)
+
+                # FIXME Noticed while updating to Mitaka. Is the line below used?
+                num_instances -= 1
+
+                # # Now consume the resources so the filter/weights
+                # # will change for the next instance.
+                # chosen_host.obj.consume_from_instance(instance_properties)
+                # if len(more_host_names):
+                    # self.host_manager.do_unlock_hosts(more_host_names)
+                    # more_host_names = []
+                # if update_group_hosts is True:
+                    # # NOTE(sbauza): Group details are serialized into a list now
+                    # # that they are populated by the conductor, we need to
+                    # # deserialize them
+                    # if isinstance(filter_properties['group_hosts'], list):
+                        # filter_properties['group_hosts'] = set(
+                            # filter_properties['group_hosts'])
+                    # filter_properties['group_hosts'].add(chosen_host.obj.host)
+
+        # FIXME Add code to ask balancer if all selected_hosts are free to be used by OpenStack
+        # FIXME FIXME Is the comment above still relevant?
+
         return selected_hosts
 
-    def _get_all_host_states(self, context):
+    def _get_all_host_states(self, context, more_hosts=0):
         """Template method, so a subclass can implement caching."""
-        return self.host_manager.get_all_host_states(context)
+        return self.host_manager.get_all_host_states(context,
+                                                     more_hosts=more_hosts)

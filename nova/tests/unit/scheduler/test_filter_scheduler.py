@@ -28,9 +28,39 @@ from nova import test  # noqa
 from nova.tests.unit.scheduler import fakes
 from nova.tests.unit.scheduler import test_scheduler
 
+global fake_get_filtered_host_counter
+fake_get_filtered_host_counter = 0
 
 def fake_get_filtered_hosts(hosts, filter_properties, index):
     return list(hosts)
+
+def fake_get_filtered_hosts_empty(hosts, filter_properties, index):
+    return list({})
+
+def fake_get_filtered_hosts_empty_then_one(hosts, filter_properties, index):
+    print "hosts = %s" % hosts
+    global fake_get_filtered_host_counter
+    print fake_get_filtered_host_counter
+    if not hosts:
+        print "returning 1"
+        return list({})
+    if fake_get_filtered_host_counter == 0:
+        fake_get_filtered_host_counter = 1
+        print "returning 2"
+        return list({})
+    else:
+        print hosts
+        host_list = list(hosts)
+        print host_list
+        first_host = host_list[0]
+        fake_get_filtered_host_counter = 0
+        print "returning 3"
+        return [first_host]
+
+def fake_get_filtered_hosts_one(hosts, filter_properties, index):
+    host_list = list(hosts)
+    first_host = host_list[0]
+    return [first_host]
 
 
 class FilterSchedulerTestCase(test_scheduler.SchedulerTestCase):
@@ -81,6 +111,53 @@ class FilterSchedulerTestCase(test_scheduler.SchedulerTestCase):
             weighed_hosts = self.driver._schedule(self.context, spec_obj)
 
         self.assertEqual(len(weighed_hosts), 10)
+        for weighed_host in weighed_hosts:
+            self.assertIsNotNone(weighed_host.obj)
+
+    @mock.patch('nova.objects.ServiceList.get_by_binary',
+                return_value=fakes.SERVICES)
+    @mock.patch('nova.objects.InstanceList.get_by_host')
+    @mock.patch('nova.objects.ComputeNodeList.get_all',
+                return_value=fakes.LCRC_COMPUTE_NODES)
+    @mock.patch('nova.db.instance_extra_get_by_instance_uuid',
+                return_value={'numa_topology': None,
+                              'pci_requests': None})
+    def test_schedule_lcrc(self, mock_get_extra, mock_get_all,
+                                mock_by_host, mock_get_by_binary):
+        self.next_weight = 1.0
+
+        def _fake_weigh_objects(_self, functions, hosts, options):
+            self.next_weight += 2.0
+            host_state = hosts[0]
+            return [weights.WeighedHost(host_state, self.next_weight)]
+
+        self.stubs.Set(self.driver.host_manager, 'get_filtered_hosts',
+                fake_get_filtered_hosts_empty_then_one)
+        self.stubs.Set(weights.HostWeightHandler,
+                'get_weighed_objects', _fake_weigh_objects)
+
+        request_spec = {'num_instances': 1,
+                        'instance_type': {'memory_mb': 512, 'root_gb': 512,
+                                          'swap': 0,
+                                          'ephemeral_gb': 0,
+                                          'vcpus': 1},
+                        'instance_properties': {'project_id': 1,
+                                                'root_gb': 512,
+                                                'memory_mb': 512,
+                                                'ephemeral_gb': 0,
+                                                'vcpus': 1,
+                                                'os_type': 'Linux',
+                                                'uuid': 'fake-uuid'}}
+        self.mox.ReplayAll()
+        # weighed_hosts = self.driver._schedule(self.context, request_spec, {},
+                                              # more=True)
+        # self.assertEqual(len(weighed_hosts), 0)
+        # self.stubs.Set(self.driver.host_manager, 'get_filtered_hosts',
+                # fake_get_filtered_hosts_one)
+        # self.driver.host_manager.get_filtered_hosts = mock.Mock(side_effect=[[], [fakes.LCRC_COMPUTE_NODES[0]]])
+        weighed_hosts = self.driver._schedule(self.context, request_spec, {},
+                                              more=True)
+        self.assertEqual(len(weighed_hosts), 1)
         for weighed_host in weighed_hosts:
             self.assertIsNotNone(weighed_host.obj)
 

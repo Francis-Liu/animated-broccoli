@@ -28,8 +28,11 @@ except ImportError:
 
 import iso8601
 from oslo_log import log as logging
+from oslo_serialization import jsonutils
 from oslo_utils import timeutils
+import requests
 import six
+import json
 
 import nova.conf
 from nova import context as context_module
@@ -349,6 +352,62 @@ class HostManager(object):
         self._instance_info = {}
         if self.tracks_instance_changes:
             self._init_instance_info()
+        self.host = '127.0.0.1'
+        self.port = '1234'
+        self.api_url = ''
+
+    def _do_request(self, method, action_url, body, headers):
+        # Connects to the server and issues a request.
+        # :returns: result data
+        # :raises: IOError if the request fails
+
+        action_url = "http://%s:%s%s/%s" % (self.host, self.port,
+                                             self.api_url, action_url)
+        try:
+            res = requests.request(method, action_url, data=body,
+                                   headers=headers)
+            status_code = res.status_code
+            if status_code in (requests.codes.OK,
+                               requests.codes.CREATED,
+                               requests.codes.ACCEPTED,
+                               requests.codes.NO_CONTENT):
+                try:
+                    return requests.codes.OK, jsonutils.loads(res.text)
+                except (TypeError, ValueError):
+                    return requests.codes.OK, res.text
+            return status_code, None
+
+        except requests.exceptions.RequestException:
+            return IOError, None
+
+    def _request(self, cmd, subcmd, body=None):
+        if body is None:
+            body = {}
+        headers = {}
+        headers['content-type'] = 'application/json'
+        headers['Accept'] = 'application/json'
+        status, res = self._do_request(cmd, subcmd, body, headers)
+        return status, res
+
+    def get_available_hosts(self):
+        """Synchronizes compute nodes enabled in Torque.
+
+        :returns: dictionary of nodes and their status
+        """
+        nodes = {}
+        status, data = self._request("GET", "nodes")
+        if data is not None:
+            nodes = data.get('nodes')
+        result = set()
+        for node in nodes:
+            print node, nodes[node]
+            if nodes[node]['openstack_state'] == 'available':
+                result.add((node, node))
+        return result
+
+    def do_unlock_hosts(self, hosts):
+        status, data = self._request("POST", "execute", body=json.dumps({'command': 'unlock_hosts', 'args': {'hosts': hosts}}))
+        return data
 
     def _load_filters(self):
         return CONF.scheduler_default_filters
@@ -543,12 +602,35 @@ class HostManager(object):
         return self.weight_handler.get_weighed_objects(self.weighers,
                 hosts, spec_obj)
 
-    def get_all_host_states(self, context):
+    def request_more_hosts(self, count):
+        """Request more hosts from the Balancer
+
+        :returns: dictionary of nodes and their status
+        """
+        nodes = {}
+        status, data = self._request("POST", "nodes/request/%d" % count)
+        if data is not None:
+            nodes = data.get('nodes')
+        result = set()
+        for node in nodes:
+            print node, nodes[node]
+            result.add((node, node))
+        return result
+
+    def get_all_host_states(self, context, more_hosts=0):
         """Returns a list of HostStates that represents all the hosts
         the HostManager knows about. Also, each of the consumable resources
         in HostState are pre-populated and adjusted based on data in the db.
         """
-
+        print "more_hosts = %d" % more_hosts
+        if more_hosts > 0:
+            _avail_hosts = self.request_more_hosts(more_hosts)
+        else:
+            _avail_hosts = self.get_available_hosts()
+        # Make a local copy of self.host_state_map, by doing this
+        # we could avoid conflicts when multiple scheduling threads
+        # update self.host_state_map concurrently.
+        _host_state_copy = {}
         service_refs = {service.host: service
                         for service in objects.ServiceList.get_by_binary(
                             context, 'nova-compute', include_disabled=True)}
@@ -579,16 +661,22 @@ class HostManager(object):
                               self._get_instance_info(context, compute))
 
             seen_nodes.add(state_key)
+            if state_key in _avail_hosts:
+                _host_state_copy[state_key] = host_state
 
         # remove compute nodes from host_state_map if they are not active
         dead_nodes = set(self.host_state_map.keys()) - seen_nodes
         for state_key in dead_nodes:
             host, node = state_key
-            LOG.info(_LI("Removing dead compute node %(host)s:%(node)s "
+            LOG.debug(_LI("Removing dead compute node %(host)s:%(node)s "
                          "from scheduler"), {'host': host, 'node': node})
             del self.host_state_map[state_key]
 
-        return six.itervalues(self.host_state_map)
+        print "returning six.itervalues(%s)" % _host_state_copy
+        if more_hosts:
+            return six.itervalues(_host_state_copy), [h[0] for h in _avail_hosts]
+        else:
+            return six.itervalues(_host_state_copy)
 
     def _get_aggregates_info(self, host):
         return [self.aggs_by_id[agg_id] for agg_id in
