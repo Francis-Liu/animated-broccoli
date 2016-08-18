@@ -129,7 +129,7 @@ class FilterScheduler(driver.Scheduler):
                         if len(more_host_names) > 0:
                             print "calling get_filtered_hosts with newly acquired hosts"
                             filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
-                                    filter_properties, index=num)
+                                    spec_obj, index=num)
                             print "new filtered_hosts = %s" % filtered_hosts
                             if not filtered_hosts:
                                 print "ERROR - host lock doesn't work!"
