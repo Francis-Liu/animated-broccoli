@@ -187,9 +187,9 @@ class FilterScheduler(driver.Scheduler):
                 # # Now consume the resources so the filter/weights
                 # # will change for the next instance.
                 # chosen_host.obj.consume_from_instance(instance_properties)
-                # if len(more_host_names):
-                    # self.host_manager.do_unlock_hosts(more_host_names)
-                    # more_host_names = []
+                if len(more_host_names):
+                    self.host_manager.do_unlock_hosts(more_host_names)
+                    more_host_names = []
                 # if update_group_hosts is True:
                     # # NOTE(sbauza): Group details are serialized into a list now
                     # # that they are populated by the conductor, we need to
