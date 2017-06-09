@@ -144,7 +144,7 @@ class FakeDriver(driver.ComputeDriver):
             'hypervisor_version': versionutils.convert_version_to_int('1.0'),
             'hypervisor_hostname': CONF.host,
             'cpu_info': {},
-            'disk_available_least': 0,
+            'disk_available_least': self.local_gb,
             'supported_instances': [(
                 obj_fields.Architecture.X86_64,
                 obj_fields.HVType.FAKE,
