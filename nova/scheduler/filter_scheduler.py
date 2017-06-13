@@ -32,6 +32,8 @@ from nova.objects import fields
 from nova import rpc
 from nova.scheduler import client as scheduler_client
 from nova.scheduler import driver
+import time
+import datetime
 
 
 CONF = nova.conf.CONF
@@ -86,7 +88,7 @@ class FilterScheduler(driver.Scheduler):
             dict(request_spec=spec_obj.to_legacy_request_spec_dict()))
         return dests
 
-    def _schedule(self, context, spec_obj):
+    def _schedule(self, context, spec_obj, more=True):
         """Returns a list of hosts that meet the required specs,
         ordered by their fitness.
         """
@@ -102,38 +104,71 @@ class FilterScheduler(driver.Scheduler):
         # are being scanned in a filter or weighing function.
         hosts = self._get_all_host_states(elevated, spec_obj)
 
+        max_loops = 2
         selected_hosts = []
+        more_host_names = []
         num_instances = spec_obj.num_instances
-        for num in range(num_instances):
-            # Filter local hosts based on requirements ...
-            hosts = self.host_manager.get_filtered_hosts(hosts,
-                    spec_obj, index=num)
-            if not hosts:
-                # Can't get any more locally.
-                break
+        loop_count = 0
+        while loop_count < max_loops:
+            loop_count += 1
+            for num in range(num_instances):
+                # Filter local hosts based on requirements ...
+                print "calling get_filtered_hosts with hosts = %s" % hosts
+                filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
+                        spec_obj, index=num)
+                print "filtered_hosts = %s" % filtered_hosts
+                if not filtered_hosts:
+                    # Can't get any more locally.
+                    if more:
+                        more = False # one request does not wait twice
+                        hosts, more_host_names = self._get_all_host_states(elevated, more_hosts=1) # TODO multiple instances might request more_hosts>1, and wait W per instance
+                        if len(more_host_names) > 0:
+                            print "calling get_filtered_hosts with newly acquired hosts"
+                            filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
+                                    spec_obj, index=num)
+                            print "new filtered_hosts = %s" % filtered_hosts
+                            if not filtered_hosts:
+                                print "ERROR - host lock doesn't work!"
+                                self.host_manager.do_unlock_hosts(more_host_names)
+                                more_host_names = []
+                                break
+                        else:
+                            print "Cannot receive extra nodes"
+                            break
+                    else:
+                        break
 
-            LOG.debug("Filtered %(hosts)s", {'hosts': hosts})
+                hosts = filtered_hosts
+                print "filtered_hosts = %s" % filtered_hosts
 
-            weighed_hosts = self.host_manager.get_weighed_hosts(hosts,
-                    spec_obj)
+                LOG.debug("Filtered %(hosts)s", {'hosts': hosts})
 
-            LOG.debug("Weighed %(hosts)s", {'hosts': weighed_hosts})
+                weighed_hosts = self.host_manager.get_weighed_hosts(hosts,
+                        spec_obj)
 
-            host_subset_size = CONF.filter_scheduler.host_subset_size
-            if host_subset_size < len(weighed_hosts):
-                weighed_hosts = weighed_hosts[0:host_subset_size]
-            chosen_host = random.choice(weighed_hosts)
+                LOG.debug("Weighed %(hosts)s", {'hosts': weighed_hosts})
 
-            LOG.debug("Selected host: %(host)s", {'host': chosen_host})
-            selected_hosts.append(chosen_host)
+                host_subset_size = CONF.filter_scheduler.host_subset_size
+                if host_subset_size < len(weighed_hosts):
+                    weighed_hosts = weighed_hosts[0:host_subset_size]
+                chosen_host = random.choice(weighed_hosts)
 
-            # Now consume the resources so the filter/weights
-            # will change for the next instance.
-            chosen_host.obj.consume_from_request(spec_obj)
-            if spec_obj.instance_group is not None:
-                spec_obj.instance_group.hosts.append(chosen_host.obj.host)
-                # hosts has to be not part of the updates when saving
-                spec_obj.instance_group.obj_reset_changes(['hosts'])
+                LOG.debug("Selected host: %(host)s", {'host': chosen_host})
+                selected_hosts.append(chosen_host)
+                num_instances -= 1
+
+                # Now consume the resources so the filter/weights
+                # will change for the next instance.
+                chosen_host.obj.consume_from_request(spec_obj)
+                if len(more_host_names):
+                    self.host_manager.do_unlock_hosts(more_host_names)
+                    more_host_names = []
+                if spec_obj.instance_group is not None:
+                    spec_obj.instance_group.hosts.append(chosen_host.obj.host)
+                    # hosts has to be not part of the updates when saving
+                    spec_obj.instance_group.obj_reset_changes(['hosts'])
+
+        # FIXME Add code to ask balancer if all selected_hosts are free to be used by OpenStack
         return selected_hosts
 
     def _get_resources_per_request_spec(self, spec_obj):
@@ -164,7 +199,7 @@ class FilterScheduler(driver.Scheduler):
 
         return resources
 
-    def _get_all_host_states(self, context, spec_obj):
+    def _get_all_host_states(self, context, spec_obj, more_hosts=0):
         """Template method, so a subclass can implement caching."""
         # NOTE(sbauza): Since Newton compute nodes require a configuration
         # change to request the Placement API, and given it goes against
@@ -177,7 +212,7 @@ class FilterScheduler(driver.Scheduler):
         # the placement API anyway.
         if service_version < 16:
             LOG.debug("Skipping call to placement, as upgrade in progress.")
-            return self.host_manager.get_all_host_states(context)
+            return self.host_manager.get_all_host_states(context, more_hosts)
         filters = {'resources': self._get_resources_per_request_spec(spec_obj)}
         reportclient = self.scheduler_client.reportclient
         rps = reportclient.get_filtered_resource_providers(filters)
@@ -189,4 +224,4 @@ class FilterScheduler(driver.Scheduler):
             return []
         compute_uuids = [rp.uuid for rp in rps]
         return self.host_manager.get_host_states_by_uuids(context,
-                                                          compute_uuids)
+                                                          compute_uuids, more_hosts)
