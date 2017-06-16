@@ -635,10 +635,10 @@ class HostManager(object):
         return self.weight_handler.get_weighed_objects(self.weighers,
                 hosts, spec_obj)
 
-    def get_host_states_by_uuids(self, context, compute_uuids):
+    def get_host_states_by_uuids(self, context, compute_uuids, more_hosts=0):
         compute_nodes = objects.ComputeNodeList.get_all_by_uuids(context,
                                                                  compute_uuids)
-        return self._get_host_states(context, compute_nodes)
+        return self._get_host_states(context, compute_nodes, more_hosts)
 
     def request_more_hosts(self, count):
         """Request more hosts from the Balancer
@@ -661,7 +661,7 @@ class HostManager(object):
         in HostState are pre-populated and adjusted based on data in the db.
         """
         compute_nodes = objects.ComputeNodeList.get_all(context)
-        return self._get_host_states(context, compute_nodes)
+        return self._get_host_states(context, compute_nodes, more_hosts)
 
     def _get_host_states(self, context, compute_nodes, more_hosts=0):
         """Returns a tuple of HostStates given a list of computes.
