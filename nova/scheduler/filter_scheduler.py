@@ -121,7 +121,7 @@ class FilterScheduler(driver.Scheduler):
                     # Can't get any more locally.
                     if more:
                         more = False # one request does not wait twice
-                        hosts, more_host_names = self._get_all_host_states(elevated, more_hosts=1) # TODO multiple instances might request more_hosts>1, and wait W per instance
+                        hosts, more_host_names = self._get_all_host_states(elevated, spec_obj, more_hosts=1) # TODO multiple instances might request more_hosts>1, and wait W per instance
                         if len(more_host_names) > 0:
                             print "calling get_filtered_hosts with newly acquired hosts"
                             filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
