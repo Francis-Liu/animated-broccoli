@@ -148,7 +148,7 @@ class FakeDriver(driver.ComputeDriver):
           'hypervisor_version': utils.convert_version_to_int('1.0'),
           'hypervisor_hostname': CONF.host,
           'cpu_info': {},
-          'disk_available_least': 0,
+          'disk_available_least': self.local_gb,
           'supported_instances': jsonutils.dumps([(arch.X86_64,
                                                    hv_type.FAKE,
                                                    vm_mode.HVM)]),
