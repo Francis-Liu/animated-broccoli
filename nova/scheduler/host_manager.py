@@ -382,7 +382,7 @@ class HostManager(object):
             nodes = data.get('nodes')
         result = set()
         for node in nodes:
-            print node, nodes[node]
+            # print node, nodes[node]
             if nodes[node]['openstack_state'] == 'available':
                 result.add((node, node))
         return result
@@ -653,7 +653,7 @@ class HostManager(object):
                          "from scheduler"), {'host': host, 'node': node})
             del self.host_state_map[state_key]
 
-        print "returning six.itervalues(%s)" % _host_state_copy
+        # print "returning six.itervalues(%s)" % _host_state_copy
         if more_hosts:
             return six.itervalues(_host_state_copy), [h[0] for h in _avail_hosts]
         else:
