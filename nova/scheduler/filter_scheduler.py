@@ -34,6 +34,7 @@ from nova.scheduler import scheduler_options
 import time
 import datetime
 
+import requests
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
@@ -212,6 +213,11 @@ class FilterScheduler(driver.Scheduler):
                             filter_properties['group_hosts'])
                     filter_properties['group_hosts'].add(chosen_host.obj.host)
 
+        try: # Notify Balancer jobs are going to run on these hosts
+            self.do_select_hosts(selected_hosts)
+        except:
+            LOG.exception("Failed to select hosts {}".format(selected_hosts))
+
         # FIXME Add code to ask balancer if all selected_hosts are free to be used by OpenStack
         return selected_hosts
 
@@ -219,3 +225,43 @@ class FilterScheduler(driver.Scheduler):
         """Template method, so a subclass can implement caching."""
         return self.host_manager.get_all_host_states(context,
                                                      more_hosts=more_hosts)
+
+    def _do_request(self, method, action_url, body, headers):
+        # Connects to the server and issues a request.
+        # :returns: result data
+        # :raises: IOError if the request fails
+
+        action_url = "http://%s:%s%s/%s" % (self.host, self.port,
+                                             self.api_url, action_url)
+        try:
+            res = requests.request(method, action_url, data=body,
+                                   headers=headers)
+            status_code = res.status_code
+            if status_code in (requests.codes.OK,
+                               requests.codes.CREATED,
+                               requests.codes.ACCEPTED,
+                               requests.codes.NO_CONTENT):
+                try:
+                    return requests.codes.OK, jsonutils.loads(res.text)
+                except (TypeError, ValueError):
+                    return requests.codes.OK, res.text
+            return status_code, None
+
+        except requests.exceptions.RequestException:
+            return IOError, None
+
+    def _request(self, cmd, subcmd, body=None):
+        if body is None:
+            body = {}
+        headers = {}
+        headers['content-type'] = 'application/json'
+        headers['Accept'] = 'application/json'
+        status, res = self._do_request(cmd, subcmd, body, headers)
+        return status, res
+
+    def do_select_hosts(self, hosts):
+        status, data = self._request("POST", "execute", body=json.dumps({'command': 'select_host', 'args': {'hosts': hosts}}))
+        LOG.debug("DO_SELECT_HOSTS")
+        LOG.debug("status = %d", status)
+        LOG.debug("data = %s", data)
+        return data

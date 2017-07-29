@@ -1936,8 +1936,11 @@ class API(base.Base):
         try:
             host = instance.host
             nodes = self.get_node_status()
-            if nodes[host]['openstack_state'] == 'available':
+            if nodes[host]['openstack_state'] == 'busy':
                 self.do_enable_host(host)
+            else:
+                LOG.error('_do_lcrc_enable_host openstack_state = %s', nodes[host]['openstack_state'],
+                          instance=instance)
         except:
             LOG.exception('Failed to enable host %s', host)
 
