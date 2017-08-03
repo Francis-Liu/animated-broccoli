@@ -215,8 +215,9 @@ class FilterScheduler(driver.Scheduler):
                             filter_properties['group_hosts'])
                     filter_properties['group_hosts'].add(chosen_host.obj.host)
 
+        _selected_hosts = [h.obj.host for h in selected_hosts]
         try: # Notify Balancer jobs are going to run on these hosts
-            self.do_select_hosts(selected_hosts)
+            self.do_select_hosts(_selected_hosts)
         except:
             LOG.exception("Failed to select hosts {}".format(selected_hosts))
 
