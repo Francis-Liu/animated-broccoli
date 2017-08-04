@@ -220,7 +220,8 @@ class FilterScheduler(driver.Scheduler):
 
         _selected_hosts = [h.obj.host for h in selected_hosts]
         try: # Notify Balancer jobs are going to run on these hosts
-            self.do_select_hosts(_selected_hosts)
+            if _selected_hosts:
+                self.do_select_hosts(_selected_hosts)
         except:
             LOG.exception("Failed to select hosts {}".format(selected_hosts))
 
@@ -266,8 +267,6 @@ class FilterScheduler(driver.Scheduler):
         return status, res
 
     def do_select_hosts(self, hosts):
-        status, data = self._request("POST", "execute", body=json.dumps({'command': 'select_host', 'args': {'hosts': hosts}}))
-        LOG.debug("DO_SELECT_HOSTS")
-        LOG.debug("status = %d", status)
-        LOG.debug("data = %s", data)
+        status, data = self._request("POST", "execute", body=json.dumps({'command': 'select_hosts', 'args': {'hosts': hosts}}))
+        LOG.debug("do_select_hosts ({}) status={}, data={}.".format(hosts, status, data))
         return data
