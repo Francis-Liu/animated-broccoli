@@ -63,6 +63,9 @@ class FilterScheduler(driver.Scheduler):
         super(FilterScheduler, self).__init__(*args, **kwargs)
         self.options = scheduler_options.SchedulerOptions()
         self.notifier = rpc.get_notifier('scheduler')
+        self.host = '127.0.0.1'
+        self.port = '1234'
+        self.api_url = ''
 
     def select_destinations(self, context, request_spec, filter_properties):
         """Selects a filtered set of hosts and nodes."""
