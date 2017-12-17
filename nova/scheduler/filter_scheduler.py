@@ -150,34 +150,32 @@ class FilterScheduler(driver.Scheduler):
             loop_count += 1
             for num in range(num_instances):
                 # Filter local hosts based on requirements ...
-                print "calling get_filtered_hosts with hosts = %s" % hosts
+                LOG.debug("LCRC calling get_filtered_hosts with hosts = %(hosts)s", {'hosts': hosts})
                 filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
                         filter_properties, index=num)
-                print "filtered_hosts = %s" % filtered_hosts
+                LOG.debug("LCRC after get_filtered_hosts filtered_hosts = %(filtered_hosts)s", {'filtered_hosts': filtered_hosts})
                 if not filtered_hosts:
                     # Can't get any more locally.
                     if more:
                         more = False # one request does not wait twice
                         hosts, more_host_names = self._get_all_host_states(elevated, more_hosts=1) # TODO multiple instances might request more_hosts>1, and wait W per instance
                         if len(more_host_names) > 0:
-                            print "calling get_filtered_hosts with newly acquired hosts"
+                            LOG.debug("LCRC calling get_filtered_hosts again with newly acquired hosts = %(hosts)s, more_host_names = %(more_host_names)s", {'hosts': hosts, 'more_host_names': more_host_names})
                             filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
                                     filter_properties, index=num)
-                            print "new filtered_hosts = %s" % filtered_hosts
+                            LOG.debug("LCRC new filtered_hosts = %(filtered_hosts)s", {'filtered_hosts': filtered_hosts})
                             if not filtered_hosts:
-                                print "ERROR - host lock doesn't work!"
+                                LOG.debug("LCRC ERROR - host lock doesn't work!")
                                 self.host_manager.do_unlock_hosts(more_host_names)
                                 more_host_names = []
                                 break
                         else:
-                            print "Cannot receive extra nodes"
+                            LOG.debug("LCRC cannot receive extra nodes")
                             break
                     else:
                         break
 
                 hosts = filtered_hosts
-                print "filtered_hosts = %s" % filtered_hosts
-
                 LOG.debug("Filtered %(hosts)s", {'hosts': hosts})
 
                 weighed_hosts = self.host_manager.get_weighed_hosts(hosts,

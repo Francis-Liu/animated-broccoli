@@ -592,7 +592,7 @@ class HostManager(object):
             nodes = data.get('nodes')
         result = set()
         for node in nodes:
-            print node, nodes[node]
+            LOG.debug("LCRC request_more_hosts received {} {}".format(node, nodes[node]))
             result.add((node, node))
         return result
 
@@ -601,7 +601,7 @@ class HostManager(object):
         the HostManager knows about. Also, each of the consumable resources
         in HostState are pre-populated and adjusted based on data in the db.
         """
-        print "more_hosts = %d" % more_hosts
+        LOG.debug("LCRC get_all_host_states more_hosts = {}".format(more_hosts))
         if more_hosts > 0:
             _avail_hosts = self.request_more_hosts(more_hosts)
         else:
