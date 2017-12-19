@@ -383,7 +383,7 @@ class HostManager(object):
         result = set()
         for node in nodes:
             # print node, nodes[node]
-            if nodes[node]['openstack_state'] == 'idle':
+            if nodes[node]['openstack_state'] in ['idle', 'exiting', 'busy']:
                 result.add((node, node))
         return result
 
