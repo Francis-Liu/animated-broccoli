@@ -391,6 +391,11 @@ class HostManager(object):
         status, data = self._request("POST", "execute", body=json.dumps({'command': 'unlock_hosts', 'args': {'hosts': hosts}}))
         return data
 
+    def do_select_hosts(self, hosts):
+        status, data = self._request("POST", "execute", body=json.dumps({'command': 'select_hosts', 'args': {'hosts': hosts}}))
+        LOG.debug("do_select_hosts ({}) status={}, data={}.".format(hosts, status, data))
+        return data
+
     def _load_filters(self):
         return CONF.scheduler_default_filters
 

@@ -23,7 +23,6 @@ import random
 
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_serialization import jsonutils
 from six.moves import range
 
 from nova import exception
@@ -36,7 +35,6 @@ import time
 import datetime
 
 import requests
-import json
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
@@ -63,9 +61,6 @@ class FilterScheduler(driver.Scheduler):
         super(FilterScheduler, self).__init__(*args, **kwargs)
         self.options = scheduler_options.SchedulerOptions()
         self.notifier = rpc.get_notifier('scheduler')
-        self.host = '127.0.0.1'
-        self.port = '1234'
-        self.api_url = ''
 
     def select_destinations(self, context, request_spec, filter_properties):
         """Selects a filtered set of hosts and nodes."""
@@ -171,6 +166,8 @@ class FilterScheduler(driver.Scheduler):
                             LOG.debug("LCRC (more)filtered_hosts={}".format(filtered_hosts))
                             if not filtered_hosts:
                                 LOG.debug("LCRC ERROR - host lock doesn't work!")
+                                # TODO first of all, this should not happen,
+                                # second of all, if this happens, better error handling.
                                 self.host_manager.do_unlock_hosts(more_host_names)
                                 more_host_names = []
                                 break
@@ -203,9 +200,6 @@ class FilterScheduler(driver.Scheduler):
                 # Now consume the resources so the filter/weights
                 # will change for the next instance.
                 chosen_host.obj.consume_from_instance(instance_properties)
-                if len(more_host_names):
-                    self.host_manager.do_unlock_hosts(more_host_names)
-                    more_host_names = []
                 if update_group_hosts is True:
                     # NOTE(sbauza): Group details are serialized into a list now
                     # that they are populated by the conductor, we need to
@@ -218,7 +212,7 @@ class FilterScheduler(driver.Scheduler):
         _selected_hosts = [h.obj.host for h in selected_hosts]
         try: # Notify Balancer jobs are going to run on these hosts
             if _selected_hosts:
-                self.do_select_hosts(_selected_hosts)
+                self.host_manager.do_select_hosts(_selected_hosts)
         except:
             LOG.exception("Failed to select hosts {}".format(selected_hosts))
 
@@ -229,41 +223,3 @@ class FilterScheduler(driver.Scheduler):
         """Template method, so a subclass can implement caching."""
         return self.host_manager.get_all_host_states(context,
                                                      more_hosts=more_hosts)
-
-    def _do_request(self, method, action_url, body, headers):
-        # Connects to the server and issues a request.
-        # :returns: result data
-        # :raises: IOError if the request fails
-
-        action_url = "http://%s:%s%s/%s" % (self.host, self.port,
-                                             self.api_url, action_url)
-        try:
-            res = requests.request(method, action_url, data=body,
-                                   headers=headers)
-            status_code = res.status_code
-            if status_code in (requests.codes.OK,
-                               requests.codes.CREATED,
-                               requests.codes.ACCEPTED,
-                               requests.codes.NO_CONTENT):
-                try:
-                    return requests.codes.OK, jsonutils.loads(res.text)
-                except (TypeError, ValueError):
-                    return requests.codes.OK, res.text
-            return status_code, None
-
-        except requests.exceptions.RequestException:
-            return IOError, None
-
-    def _request(self, cmd, subcmd, body=None):
-        if body is None:
-            body = {}
-        headers = {}
-        headers['content-type'] = 'application/json'
-        headers['Accept'] = 'application/json'
-        status, res = self._do_request(cmd, subcmd, body, headers)
-        return status, res
-
-    def do_select_hosts(self, hosts):
-        status, data = self._request("POST", "execute", body=json.dumps({'command': 'select_hosts', 'args': {'hosts': hosts}}))
-        LOG.debug("do_select_hosts ({}) status={}, data={}.".format(hosts, status, data))
-        return data
