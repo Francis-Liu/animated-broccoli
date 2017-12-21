@@ -383,7 +383,7 @@ class HostManager(object):
         result = set()
         for node in nodes:
             # print node, nodes[node]
-            if nodes[node]['openstack_state'] in ['idle', 'exiting']: # add 'busy' state if supporting multi-vm-per-node
+            if nodes[node]['openstack_state'] in ['idle']: # add 'busy' state if supporting multi-vm-per-node
                 result.add((node, node))
         return result
 
