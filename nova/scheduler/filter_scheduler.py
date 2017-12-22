@@ -132,6 +132,52 @@ class FilterScheduler(driver.Scheduler):
                                   'config_options': config_options,
                                   'instance_type': instance_type})
 
+        selected_hosts = []
+        num_instances = request_spec.get('num_instances', 1)
+        for num in range(num_instances):
+            hosts, more_host_names = self._get_all_host_states(elevated, more_hosts=1)
+            if len(more_host_names) > 0:
+                LOG.debug("LCRC calling get_filtered_hosts with more_host_names={}".format(more_host_names))
+                filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
+                        filter_properties, index=num)
+                if not filtered_hosts:
+                    LOG.debug("FATAL LCRC ERROR - host lock doesn't work!")
+                    self.host_manager.do_unlock_hosts(more_host_names)
+                    break
+            else:
+                LOG.debug("LCRC cannot receive extra nodes")
+                break
+
+            hosts = filtered_hosts
+            weighed_hosts = self.host_manager.get_weighed_hosts(hosts,
+                    filter_properties)
+
+            scheduler_host_subset_size = CONF.scheduler_host_subset_size
+            if scheduler_host_subset_size > len(weighed_hosts):
+                scheduler_host_subset_size = len(weighed_hosts)
+            if scheduler_host_subset_size < 1:
+                scheduler_host_subset_size = 1
+
+            chosen_host = random.choice(
+                weighed_hosts[0:scheduler_host_subset_size])
+            LOG.debug("LCRC Selected host: %(host)s", {'host': chosen_host})
+            selected_hosts.append(chosen_host)
+            num_instances -= 1
+
+            # Now consume the resources so the filter/weights
+            # will change for the next instance.
+            chosen_host.obj.consume_from_instance(instance_properties)
+            if update_group_hosts is True:
+                # NOTE(sbauza): Group details are serialized into a list now
+                # that they are populated by the conductor, we need to
+                # deserialize them
+                if isinstance(filter_properties['group_hosts'], list):
+                    filter_properties['group_hosts'] = set(
+                        filter_properties['group_hosts'])
+                filter_properties['group_hosts'].add(chosen_host.obj.host)
+
+        return selected_hosts
+        """
         # Find our local list of acceptable hosts by repeatedly
         # filtering and weighing our options. Each time we choose a
         # host, we virtually consume resources on it so subsequent
@@ -210,14 +256,16 @@ class FilterScheduler(driver.Scheduler):
                     filter_properties['group_hosts'].add(chosen_host.obj.host)
 
         _selected_hosts = [h.obj.host for h in selected_hosts]
+
+        # FIXME Add code to ask balancer if all selected_hosts are free to be used by OpenStack
         try: # Notify Balancer jobs are going to run on these hosts
             if _selected_hosts:
                 self.host_manager.do_select_hosts(_selected_hosts)
         except:
             LOG.exception("Failed to select hosts {}".format(selected_hosts))
 
-        # FIXME Add code to ask balancer if all selected_hosts are free to be used by OpenStack
         return selected_hosts
+        """
 
     def _get_all_host_states(self, context, more_hosts=0):
         """Template method, so a subclass can implement caching."""
