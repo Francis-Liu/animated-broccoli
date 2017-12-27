@@ -1658,11 +1658,9 @@ class API(base.Base):
             nodes = data.get('nodes')
         return nodes
 
-    def do_enable_host(self, host):
+    def do_enable_host(self, host, instance):
         status, data = self._request("POST", "execute", body=json.dumps({'command': 'enable_host', 'args': {'host': host}}))
-        LOG.debug("AAA")
-        LOG.debug("status = %d", status)
-        LOG.debug("data = %s", data)
+        LOG.debug("LCRC do_enable_host host {} status={}, data={}".format(host, status, data), instance=instance)
         return data
 
     def _delete(self, context, instance, delete_type, cb, **instance_attrs):
@@ -1935,14 +1933,10 @@ class API(base.Base):
     def _do_lcrc_enable_host(self, instance):
         try:
             host = instance.host
-            nodes = self.get_node_status()
-            if nodes[host]['openstack_state'] == 'busy':
-                self.do_enable_host(host)
-            else:
-                LOG.error('_do_lcrc_enable_host host {} openstack_state = {}'.format(host, nodes[host]['openstack_state']),
-                          instance=instance)
+            LOG.debug("LCRC _do_lcrc_enable_host {}".format(host), instance=instance)
+            self.do_enable_host(host, instance=instance)
         except:
-            LOG.exception('Failed to enable host %s', host)
+            LOG.exception(_LE("LCRC ERROR Failed to enable host %s".format(host)), instance=instance)
 
     def _do_delete(self, context, instance, bdms, reservations=None,
                    local=False):
