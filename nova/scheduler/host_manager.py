@@ -619,7 +619,13 @@ class HostManager(object):
                         for service in objects.ServiceList.get_by_binary(
                             context, 'nova-compute')}
         # Get resource usage across the available compute nodes:
-        compute_nodes = objects.ComputeNodeList.get_all(context)
+        # compute_nodes = objects.ComputeNodeList.get_all(context)
+        # Get resource usage of only the available nodes
+        compute_nodes = []
+        for _host in _avail_hosts:
+            tmp = objects.ComputeNodeList.get_all_by_host(context, _host[0])
+            LOG.debug("LCRC get_all_by_host {} returned {}".format(_host[0], tmp))
+            compute_nodes += tmp
         seen_nodes = set()
         for compute in compute_nodes:
             service = service_refs.get(compute.host)
@@ -651,12 +657,12 @@ class HostManager(object):
                 _host_state_copy[state_key] = host_state
 
         # remove compute nodes from host_state_map if they are not active
-        dead_nodes = set(self.host_state_map.keys()) - seen_nodes
-        for state_key in dead_nodes:
-            host, node = state_key
-            LOG.debug(_LI("Removing dead compute node %(host)s:%(node)s "
-                         "from scheduler"), {'host': host, 'node': node})
-            del self.host_state_map[state_key]
+        # dead_nodes = set(self.host_state_map.keys()) - seen_nodes
+        # for state_key in dead_nodes:
+        #     host, node = state_key
+        #     LOG.debug(_LI("Removing dead compute node %(host)s:%(node)s "
+        #                  "from scheduler"), {'host': host, 'node': node})
+        #     del self.host_state_map[state_key]
 
         # print "returning six.itervalues(%s)" % _host_state_copy
         if more_hosts:

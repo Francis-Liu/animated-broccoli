@@ -141,7 +141,7 @@ class FilterScheduler(driver.Scheduler):
                 filtered_hosts = self.host_manager.get_filtered_hosts(hosts,
                         filter_properties, index=num)
                 if not filtered_hosts:
-                    LOG.debug("FATAL LCRC ERROR - host lock doesn't work!")
+                    LOG.debug("FATAL LCRC ERROR - host lock doesn't work on {}".format(more_host_names))
                     break
             else:
                 LOG.debug("LCRC cannot receive extra nodes")
