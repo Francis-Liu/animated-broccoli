@@ -230,10 +230,10 @@ class ConductorManager(manager.Manager):
     # NOTE(hanlind): This can be removed in version 3.0 of the RPC API
     def instance_get_all_by_filters(self, context, filters, sort_key,
                                     sort_dir, columns_to_join,
-                                    use_slave):
+                                    use_subordinate):
         result = self.db.instance_get_all_by_filters(
             context, filters, sort_key, sort_dir,
-            columns_to_join=columns_to_join, use_slave=use_slave)
+            columns_to_join=columns_to_join, use_subordinate=use_subordinate)
         return jsonutils.to_primitive(result)
 
     # NOTE(hanlind): This can be removed in version 3.0 of the RPC API
